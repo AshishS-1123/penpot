@@ -149,6 +149,7 @@
       ["/error-by-id/:id" {:handler (:retrieve-error debug)}]
       ["/error/:id" {:handler (:retrieve-error debug)}]
       ["/error" {:handler (:retrieve-error-list debug)}]
+      ["/file/export" {:get (:export debug)}]
       ["/file/data" {:handler (:file-data debug)}]
       ["/file/changes" {:handler (:retrieve-file-changes debug)}]]
 

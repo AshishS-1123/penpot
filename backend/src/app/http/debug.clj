@@ -15,6 +15,7 @@
    [app.db.sql :as sql]
    [app.rpc.mutations.files :as m.files]
    [app.rpc.queries.profile :as profile]
+   [app.http.debug.export :as dbg-export]
    [app.util.blob :as blob]
    [app.util.template :as tmpl]
    [app.util.time :as dt]
@@ -256,4 +257,5 @@
    :retrieve-error (wrap-async cfg retrieve-error)
    :retrieve-error-list (wrap-async cfg retrieve-error-list)
    :file-data (wrap-async cfg file-data)
-   :changelog (wrap-async cfg changelog)})
+   :changelog (wrap-async cfg changelog)
+   :export (wrap-async cfg dbg-export/handler cfg)})

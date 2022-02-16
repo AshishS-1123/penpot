@@ -137,7 +137,8 @@
 
    :app.http.debug/handlers
    {:pool (ig/ref :app.db/pool)
-    :executor (ig/ref [::worker :app.worker/executor])}
+    :executor (ig/ref [::worker :app.worker/executor])
+    :storage (ig/ref :app.storage/storage)}
 
    :app.http.websocket/handler
    {:pool     (ig/ref :app.db/pool)
