@@ -17,6 +17,8 @@
    [app.db :as db]
    [app.util.blob :as blob]
    [app.tasks.file-media-gc :as tfm]
+   [app.rpc.mutations.files :as m.files]
+   [app.rpc.queries.profile :as profile]
    [app.util.time :as dt]
    [app.storage :as sto]
    [clojure.java.io :as io]
@@ -33,7 +35,8 @@
    java.io.BufferedOutputStream
    java.io.BufferedInputStream
    org.apache.commons.io.IOUtils
-   com.github.luben.zstd.ZstdOutputStream))
+   com.github.luben.zstd.ZstdOutputStream
+   org.apache.commons.io.input.BoundedInputStream))
 
 (def ^:const buffer-size (:http/output-buffer-size yt/base-defaults))
 
@@ -81,7 +84,56 @@
             (with-open [istream (sto/get-object-data storage obj)]
               (IOUtils/copyLarge istream ostream 0 (:size obj) buff))))))))
 
-(defn handler
+(defn read-import!
+  [{:keys [pool storage profile-id]} ^DataInputStream istream]
+  (let [mnum       (.readUTF istream)
+        file-id    (uuid/next)
+        project-id (some-> (profile/retrieve-additional-data pool profile-id) :default-project-id)]
+
+    (when-not project-id
+      (ex/raise :type :validation
+                :code :unable-to-lookup-project))
+
+    (when (not= mnum "PENPOT_CUSTOM_FILE")
+      (ex/raise :type :validation
+                :code :invalid-import-file))
+
+    (db/with-atomic [conn pool]
+      (let [blen    (.readLong istream)
+            bdata   (byte-array blen)
+            fname   (str "imported-custom-file-" (dt/now))
+            storage (media/configure-assets-storage storage conn)]
+
+        (.readFully istream bdata 0 blen)
+        (m.files/create-file conn {:id file-id
+                                   :name fname
+                                   :project-id project-id
+                                   :profile-id profile-id
+                                   :data bdata})
+
+        (let [nmedia (.readLong istream)]
+          (dotimes [i nmedia]
+            (prn "importing media" i)
+            (let [huid    (.readLong istream)
+                  luid    (.readLong istream)
+                  size    (.readLong istream)
+                  id      (uuid/custom luid huid)
+                  content (sto/content (doto (BoundedInputStream. istream size)
+                                         (.setPropagateClose false))
+                                       size)
+                  sobj    (sto/put-object storage {:content content})]
+              (db/insert! conn :file-media-object
+                          {:id (uuid/next)
+                           :file-id file-id
+                           :is-local false
+                           :name "test"
+                           :media-id (:id sobj)
+                           :thumbnail-id nil
+                           :width 100
+                           :height 100
+                           :mtype "image/png"}))))))))
+
+(defn export-handler
   [cfg request]
   (let [file-id (some-> (get-in request [:params :file-id]) uuid/uuid)]
     (when-not file-id
@@ -103,3 +155,18 @@
                   (catch Throwable cause
                     (l/warn :hint "unexpected exception on writing export"
                             :cause cause))))))}))
+
+
+(defn import-handler
+  [cfg {:keys [params profile-id] :as request}]
+  (when-not (contains? params :file)
+    (ex/raise :type :validation
+              :code :missing-upload-file
+              :hint "missing upload file"))
+  (with-open [istream (io/input-stream (-> params :file :tempfile))]
+    (with-open [istream (DataInputStream. istream)]
+      (let [cfg (assoc cfg :profile-id profile-id)]
+        (read-import! cfg istream)
+        {:status 200
+         :headers {"content-type" "text/plain"}
+         :body "OK"}))))
