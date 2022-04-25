@@ -9,27 +9,27 @@
   (:require
    [app.common.data :as d]
    [app.common.exceptions :as ex]
-   [app.common.spec :as us]
-   [app.common.uuid :as uuid]
    [app.common.logging :as l]
-   [app.media :as media]
+   [app.common.pages.migrations :as pmg]
+   [app.common.pprint :as pp]
+   [app.common.spec :as us]
+   [app.common.transit :as t]
+   [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.db :as db]
-   [app.common.pages.migrations :as pmg]
-   [app.util.blob :as blob]
-   [app.tasks.file-media-gc :as tfm]
-   [clojure.walk :as walk]
-   [app.rpc.mutations.files :as m.files]
+   [app.media :as media]
+   [app.rpc.mutations.files :refer [create-file]]
    [app.rpc.queries.profile :as profile]
-   [app.util.time :as dt]
    [app.storage :as sto]
+   [app.tasks.file-gc]
+   [app.util.blob :as blob]
+   [app.util.time :as dt]
    [clojure.java.io :as io]
+   [clojure.walk :as walk]
    [cuerdas.core :as str]
    [datoteka.core :as fs]
-   [ring.core.protocols :as rp]
-   [app.common.transit :as t]
-   [fipp.edn :as fpp]
-   [yetti.adapter :as yt])
+   [yetti.adapter :as yt]
+   [yetti.response :as yrs])
   (:import
    java.io.DataOutputStream
    java.io.DataInputStream
@@ -47,7 +47,7 @@
 ;; HELPERS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def ^:const buffer-size (:http/output-buffer-size yt/base-defaults))
+(def ^:const buffer-size (:xnio/buffer-size yt/defaults))
 
 (defn get-mark
   [id]
@@ -224,13 +224,12 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def storage-object-id-xf
-  (comp
-   (mapcat (juxt :media-id :thumbnail-id))
-   (filter uuid?)))
+  (comp (mapcat (juxt :media-id :thumbnail-id))
+        (filter uuid?)))
 
 (defn get-used-media
   [pool fdata]
-  (let [ids (#'tfm/collect-used-media fdata)]
+  (let [ids (app.tasks.file-gc/collect-used-media fdata)]
     (with-open [conn (db/open pool)]
       (let [sql "select * from file_media_object where id = ANY(?)"]
         (db/exec! conn [sql (db/create-array conn "uuid" ids)])))))
@@ -277,7 +276,7 @@
                                       (assoc :content content)
                                       (assoc :touched-at (dt/now))
                                       (assoc :reference "file-media-object"))]
-                (assoc result id (sto/put-object storage params)))))
+                (assoc result id (sto/put-object! storage params)))))
 
           (process-form [index form]
             (cond-> form
@@ -310,7 +309,6 @@
           project-id (some-> (profile/retrieve-additional-data pool profile-id) :default-project-id)
           header     (read-header! istream)]
 
-
       (when-not project-id
         (ex/raise :type :validation
                   :code :unable-to-lookup-project))
@@ -340,14 +338,14 @@
 
 
           ;; Create an empty filie
-          (m.files/create-file conn {:id file-id
-                                     :name (:name file)
-                                     :project-id project-id
-                                     :profile-id profile-id
-                                     :data (blob/encode fdata)})
+          (create-file conn {:id file-id
+                             :name (:name file)
+                             :project-id project-id
+                             :profile-id profile-id
+                             :data (blob/encode fdata)})
 
           (prn "----------------- INDEX")
-          (fipp.edn/pprint index)
+          (pp/pprint index)
           (doseq [{:keys [media-id thumbnail-id] :as item} fmedia]
             (let [params {:id (uuid/next)
                           :file-id file-id
@@ -359,8 +357,8 @@
                           :height (:height item)
                           :mtype (:mtype item)}]
               (prn "=========================================")
-              (fipp.edn/pprint item)
-              (fipp.edn/pprint params)
+              (pp/pprint item)
+              (pp/pprint params)
               (db/insert! conn :file-media-object params))))))))
 
 (defn export-handler
@@ -370,22 +368,25 @@
       (ex/raise :type :validation
                 :code :missing-arguments))
 
-    {:status 200
+    (yrs/response
+     :status  200
      :headers {"content-type" "application/octet-stream"
                "content-disposition" "attachment"}
-     :body (reify rp/StreamableResponseBody
-             (write-body-to-stream [_ _ output-stream]
-               (time
-                (try
-                  (with-open [ostream (DataOutputStream. output-stream)]
-                    (write-export! (assoc cfg :file-id file-id) ostream))
-                  (catch org.eclipse.jetty.io.EofException _cause
-                    ;; Do nothing, EOF means client closes connection abruptly
-                    nil)
-                  (catch Throwable cause
-                    (l/warn :hint "unexpected exception on writing export"
-                            :cause cause))))))}))
+     :body    (reify yrs/StreamableResponseBody
+                (-write-body-to-stream [_ _ output-stream]
+                  (time
+                   (try
+                     (with-open [ostream (DataOutputStream. output-stream)]
+                       (write-export! (assoc cfg :file-id file-id) ostream))
 
+                     (catch java.io.IOException _cause
+                       ;; Do nothing, EOF means client closes connection abruptly
+                       nil)
+                     (catch Throwable cause
+                       (l/warn :hint "unexpected error on encoding response"
+                               :cause cause))
+                     (finally
+                       (.close ^OutputStream output-stream)))))))))
 
 (defn import-handler
   [cfg {:keys [params profile-id] :as request}]
@@ -397,6 +398,7 @@
     (with-open [istream (DataInputStream. istream)]
       (let [cfg (assoc cfg :profile-id profile-id)]
         (read-import! cfg istream)
-        {:status 200
+        (yrs/response
+         :status  200
          :headers {"content-type" "text/plain"}
-         :body "OK"}))))
+         :body    "OK")))))

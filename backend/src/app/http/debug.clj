@@ -61,17 +61,15 @@
   "select revn, changes, data from file_change where file_id=? and revn = ?")
 
 (defn prepare-response
-  [{:keys [params] :as request} body filename]
-  (when-not body
-    (ex/raise :type :not-found
-              :code :enpty-data
-              :hint "empty response"))
+  [body]
+  (let [headers {"content-type" "application/transit+json"}]
+    (yrs/response :status 200 :body body :headers headers)))
 
-  (cond-> (yrs/response :status  200
-                        :body    body
-                        :headers {"content-type" "application/transit+json"})
-    (contains? params :download)
-    (update :headers assoc "content-disposition" (str "attachment; filename=" filename))))
+(defn prepare-download-response
+  [body filename]
+  (let [headers {"content-disposition" (str "attachment; filename=" filename)
+                 "content-type" "application/octet-stream"}]
+    (yrs/response :status 200 :body body :headers headers)))
 
 (defn- retrieve-file-data
   [{:keys [pool]} {:keys [params] :as request}]
@@ -82,6 +80,7 @@
   (let [file-id  (some-> (get-in request [:params :file-id]) uuid/uuid)
         revn     (some-> (get-in request [:params :revn]) d/parse-integer)
         filename (str file-id)]
+
     (when-not file-id
       (ex/raise :type :validation
                 :code :missing-arguments))
@@ -89,10 +88,15 @@
     (let [data (if (integer? revn)
                  (some-> (db/exec-one! pool [sql:retrieve-single-change file-id revn]) :data)
                  (some-> (db/get-by-id pool :file file-id) :data))]
+
+      (when-not body
+        (ex/raise :type :not-found
+                  :code :enpty-data
+                  :hint "empty response"))
+
       (if (contains? params :download)
-        (-> (prepare-response request data filename)
-            (update :headers assoc "content-type" "application/octet-stream"))
-        (prepare-response request (some-> data blob/decode) filename)))))
+        (prepare-download-response data filename)
+        (prepare-response (some-> data blob/decode))))))
 
 (defn- upload-file-data
   [{:keys [pool]} {:keys [profile-id params] :as request}]
