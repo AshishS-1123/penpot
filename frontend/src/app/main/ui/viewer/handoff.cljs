@@ -25,7 +25,7 @@
     (st/emit! (dv/select-shape (:id frame)))))
 
 (mf/defc viewport
-  [{:keys [local file page frame]}]
+  [{:keys [local file page frame size]}]
   (let [on-mouse-wheel
         (fn [event]
           (when (kbd/mod? event)
@@ -59,7 +59,7 @@
                        :page page}]
      [:div.handoff-svg-wrapper {:on-click (handle-select-frame frame)}
       [:div.handoff-svg-container
-       [:& render-frame-svg {:frame frame :page page :local local}]]]
+       [:& render-frame-svg {:frame frame :page page :local local :size size}]]]
 
      [:& right-sidebar {:frame frame
                         :selected (:selected local)
