@@ -353,8 +353,10 @@
             unames         (into #{} (map :name) all-components)
             new-name       (dwc/generate-unique-name unames (:name component))
 
-            [new-shape new-shapes _updated-shapes]
+            [new-shape new-shapes _updated-shapes main-instance main-instance-page]
             (dwlh/duplicate-component component)
+
+            _ (prn "OJOOOOOOOOOOOOOOO falta calcular main-instance")
 
             changes (-> (pcb/empty-changes it nil) ;; no objects are changed
                         (pcb/with-objects nil)     ;; in the current page
@@ -362,7 +364,9 @@
                                            (:path component)
                                            new-name
                                            new-shapes
-                                           []))]
+                                           []
+                                           (:id main-instance)
+                                           (:id main-instance-page)))]
 
         (rx/of (dch/commit-changes changes))))))
 

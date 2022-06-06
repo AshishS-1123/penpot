@@ -24,6 +24,7 @@
 (mf/defc component-menu
   [{:keys [ids values] :as props}]
   (let [current-file-id (mf/use-ctx ctx/current-file-id)
+        current-page-id (mf/use-ctx ctx/current-page-id)
 
         id              (first ids)
         local           (mf/use-state {:menu-open false})
@@ -40,6 +41,8 @@
 
         component       (cph/get-component libraries library-id component-id)
         show?           (some? component-id)
+
+        main-instance?  (cph/is-main-instance? id current-page-id component)
 
         on-menu-click
         (mf/use-callback
@@ -80,7 +83,9 @@
         [:span (tr "workspace.options.component")]]
        [:div.element-set-content
         [:div.row-flex.component-row
-         i/component
+         (if main-instance?
+               i/component
+               i/component-copy)
          (:name component)
          [:div.row-actions
           {:on-click on-menu-click}

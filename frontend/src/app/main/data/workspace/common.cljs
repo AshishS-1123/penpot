@@ -357,11 +357,15 @@
   (ptk/reify ::delete-shapes
     ptk/WatchEvent
     (watch [it state _]
-      (let [page-id (:current-page-id state)
-            objects (wsh/lookup-page-objects state page-id)
-            page    (wsh/lookup-page state page-id)
+      (let [file-id   (:current-file-id state)
+            page-id   (:current-page-id state)
+            file      (wsh/get-file state file-id)
+            page      (wsh/lookup-page state page-id)
+            objects   (wsh/lookup-page-objects state page-id)
 
-            ids     (cph/clean-loops objects ids)
+            ids       (cph/clean-loops objects ids)
+
+            local-library {file-id {:data file}}
 
             groups-to-unmask
             (reduce (fn [group-ids id]
@@ -435,9 +439,29 @@
             ;; Any parent whose children are all deleted, must be deleted too.
             (into (d/ordered-set) (find-all-empty-parents #{}))
 
+            components-to-delete
+            (reduce (fn [components id]
+                      (let [shape (get objects id)
+
+                            component
+                            (when (and (:component-id shape) (:component-file shape))
+                              ;; Only local components may have main instances
+                              (cph/get-component local-library (:component-file shape) (:component-id shape)))
+
+                            main-instance?
+                            (when component
+                              (cph/is-main-instance? (:id shape) (:id page) component))]
+
+                        (if main-instance?
+                          (conj components (:component-id shape))
+                          components)))
+                    []
+                    (into ids all-children))
+
             changes (-> (pcb/empty-changes it page-id)
                         (pcb/with-page page)
                         (pcb/with-objects objects)
+                        (pcb/with-library-data file)
                         (pcb/set-page-option :guides guides)
                         (pcb/remove-objects all-children)
                         (pcb/remove-objects ids)
@@ -459,7 +483,12 @@
                           (pcb/update-page-option :flows (fn [flows]
                                                            (reduce #(csp/remove-flow %1 (:id %2))
                                                                    flows
-                                                                   starting-flows)))))]
+                                                                   starting-flows)))))
+
+            changes (reduce (fn [changes component-id]
+                              (pcb/delete-component changes component-id))
+                            changes
+                            components-to-delete)]
 
         (rx/of (dch/commit-changes changes))))))
 

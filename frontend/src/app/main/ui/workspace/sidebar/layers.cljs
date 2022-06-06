@@ -31,6 +31,8 @@
 (def shape-for-rename-ref
   (l/derived (l/in [:workspace-local :shape-for-rename]) st/state))
 
+(def libraries-ctx (mf/create-context nil))
+
 (mf/defc layer-name
   [{:keys [shape on-start-edit on-stop-edit name-ref] :as props}]
   (let [local            (mf/use-state {})
@@ -89,7 +91,7 @@
        (l/derived refs/workspace-local)))
 
 (mf/defc layer-item
-  [{:keys [index item selected objects] :as props}]
+  [{:keys [index page item selected objects] :as props}]
   (let [id         (:id item)
         selected?  (contains? selected id)
         container? (or (cph/frame-shape? item)
@@ -97,6 +99,12 @@
 
         disable-drag      (mf/use-state false)
         scroll-to-middle? (mf/use-var true)
+
+        libraries      (mf/use-ctx libraries-ctx)
+        component      (when (and (:component-id item) (:component-file item))
+                         (cph/get-component libraries (:component-file item) (:component-id item)))
+        main-instance? (when component
+                         (cph/is-main-instance? (:id item) (:id page) component))
 
         expanded-iref (mf/use-memo
                        (mf/deps id)
@@ -217,7 +225,8 @@
                                                      :icon-layer (= (:type item) :icon))
                               :on-click select-shape
                               :on-double-click #(dom/stop-propagation %)}
-      [:& si/element-icon {:shape item}]
+      [:& si/element-icon {:shape item
+                           :main-instance? main-instance?}]
       [:& layer-name {:shape item
                       :name-ref ref
                       :on-start-edit #(reset! disable-drag true)
@@ -241,7 +250,8 @@
         (for [[index id] (reverse (d/enumerate (:shapes item)))]
           (when-let [item (get objects id)]
             [:& layer-item
-             {:item item
+             {:page page
+              :item item
               :selected selected
               :index index
               :objects objects
@@ -262,39 +272,47 @@
   {::mf/wrap [#(mf/memo % =)
               #(mf/throttle % 200)]}
   [{:keys [objects] :as props}]
-  (let [selected (mf/deref refs/selected-shapes)
-        selected (hooks/use-equal-memo selected)
+  (let [page       (mf/deref refs/workspace-page)
+        selected   (mf/deref refs/selected-shapes)
+        selected   (hooks/use-equal-memo selected)
+        libraries  (mf/deref refs/workspace-libraries)
+        local-file (deref refs/workspace-local-library)
         root (get objects uuid/zero)]
-    [:ul.element-list
-     [:& hooks/sortable-container {}
-      (for [[index id] (reverse (d/enumerate (:shapes root)))]
-        (when-let [obj (get objects id)]
-          (if (= (:type obj) :frame)
-            [:& frame-wrapper
-             {:item obj
-              :selected selected
-              :index index
-              :objects objects
-              :key id}]
-            [:& layer-item
-             {:item obj
-              :selected selected
-              :index index
-              :objects objects
-              :key id}])))]]))
+    [:& (mf/provider libraries-ctx) {:value (assoc libraries
+                                                   (:id local-file) {:data local-file})}
+      [:ul.element-list
+       [:& hooks/sortable-container {}
+        (for [[index id] (reverse (d/enumerate (:shapes root)))]
+          (when-let [obj (get objects id)]
+            (if (= (:type obj) :frame)
+              [:& frame-wrapper
+               {:item obj
+                :selected selected
+                :index index
+                :objects objects
+                :key id}]
+              [:& layer-item
+               {:page page
+                :item obj
+                :selected selected
+                :index index
+                :objects objects
+                :key id}])))]]]))
 
 (mf/defc filters-tree
   {::mf/wrap [#(mf/memo % =)
               #(mf/throttle % 200)]}
   [{:keys [objects] :as props}]
-  (let [selected (mf/deref refs/selected-shapes)
+  (let [page       (mf/deref refs/workspace-page)
+        selected (mf/deref refs/selected-shapes)
         selected (hooks/use-equal-memo selected)
         root (get objects uuid/zero)]
     [:ul.element-list
      (for [[index id] (d/enumerate (:shapes root))]
        (when-let [obj (get objects id)]
          [:& layer-item
-          {:item obj
+          {:page page
+           :item obj
            :selected selected
            :index index
            :objects objects
