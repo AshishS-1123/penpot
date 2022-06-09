@@ -10,7 +10,8 @@
    [app.common.geom.point :as gpt]
    [app.common.pages.helpers :as cph]
    [app.common.spec :as us]
-   [app.common.spec.interactions :as cti]
+   [app.common.types.shape.interactions :as ctsi]
+   [app.common.uuid :as uuid]
    [app.main.data.comments :as dcm]
    [app.main.data.fonts :as df]
    [app.main.repo :as rp]
@@ -375,7 +376,7 @@
   ([frame-id] (go-to-frame frame-id nil))
   ([frame-id animation]
    (us/verify ::us/uuid frame-id)
-   (us/verify (s/nilable ::cti/animation) animation)
+   (us/verify (s/nilable ::ctsi/animation) animation)
    (ptk/reify ::go-to-frame
      ptk/UpdateEvent
      (update [_ state]
@@ -467,7 +468,7 @@
   (us/verify ::gpt/point position)
   (us/verify (s/nilable ::us/boolean) close-click-outside)
   (us/verify (s/nilable ::us/boolean) background-overlay)
-  (us/verify (s/nilable ::cti/animation) animation)
+  (us/verify (s/nilable ::ctsi/animation) animation)
   (ptk/reify ::open-overlay
     ptk/UpdateEvent
     (update [_ state]
@@ -492,7 +493,7 @@
   (us/verify ::gpt/point position)
   (us/verify (s/nilable ::us/boolean) close-click-outside)
   (us/verify (s/nilable ::us/boolean) background-overlay)
-  (us/verify (s/nilable ::cti/animation) animation)
+  (us/verify (s/nilable ::ctsi/animation) animation)
   (ptk/reify ::toggle-overlay
     ptk/UpdateEvent
     (update [_ state]
@@ -511,13 +512,13 @@
                            animation)
           (do-close-overlay state
                             (:id frame)
-                            (cti/invert-direction animation)))))))
+                            (ctsi/invert-direction animation)))))))
 
 (defn close-overlay
   ([frame-id] (close-overlay frame-id nil))
   ([frame-id animation]
    (us/verify ::us/uuid frame-id)
-   (us/verify (s/nilable ::cti/animation) animation)
+   (us/verify (s/nilable ::ctsi/animation) animation)
    (ptk/reify ::close-overlay
      ptk/UpdateEvent
      (update [_ state]

@@ -10,7 +10,7 @@
    [app.common.data.macros :as dm]
    [app.common.geom.shapes :as gsh]
    [app.common.spec :as us]
-   [app.common.spec.page :as spec.page]
+   [app.common.types.page :as ctp]
    [app.common.uuid :as uuid]
    [cuerdas.core :as str]))
 
@@ -59,7 +59,7 @@
 
 (defn get-shape
   [container shape-id]
-  (us/assert ::spec.page/container container)
+  (us/assert ::ctp/container container)
   (us/assert ::us/uuid shape-id)
   (-> container
       (get :objects)

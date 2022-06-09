@@ -14,8 +14,8 @@
    [app.common.pages.changes-builder :as pcb]
    [app.common.pages.helpers :as cph]
    [app.common.spec :as us]
-   [app.common.spec.color :as color]
    [app.common.text :as txt]
+   [app.common.types.shape.color :as ctsc]
    [app.main.data.workspace.common :as dwc]
    [app.main.data.workspace.groups :as dwg]
    [app.main.data.workspace.state-helpers :as wsh]
@@ -301,7 +301,7 @@
 
 (defmethod uses-assets? :colors
   [_ shape library-id _]
-  (color/uses-library-colors? shape library-id))
+  (ctsc/uses-library-colors? shape library-id))
 
 (defmethod uses-assets? :typographies
   [_ shape library-id _]
@@ -333,7 +333,7 @@
   (let [library-colors (get-assets library-id :colors state)]
     (pcb/update-shapes changes
                        [(:id shape)]
-                       #(color/sync-shape-colors % library-id library-colors))))
+                       #(ctsc/sync-shape-colors % library-id library-colors))))
 
 (defmethod generate-sync-shape :typographies
   [_ changes library-id state container shape]

@@ -4,7 +4,7 @@
 ;;
 ;; Copyright (c) UXBOX Labs SL
 
-(ns app.common.spec.typography
+(ns app.common.types.shape.typography
   (:require
    [clojure.spec.alpha :as s]))
 
