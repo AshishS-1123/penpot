@@ -15,6 +15,7 @@
    [app.common.spec :as us]
    [app.common.types.page :as ctp]
    [app.common.types.shape :as cts]
+   [app.common.types.shape-tree :as ctt]
    [app.common.types.shape.interactions :as ctsi]
    [app.common.uuid :as uuid]
    [app.main.data.workspace.changes :as dch]
@@ -55,33 +56,6 @@
                  :file-raw file-raw}]
         (->> (uw/ask! msg)
              (rx/map (constantly ::index-initialized)))))))
-
-;; --- Common Helpers & Events
-
-(defn- extract-numeric-suffix
-  [basename]
-  (if-let [[_ p1 p2] (re-find #"(.*)-([0-9]+)$" basename)]
-    [p1 (+ 1 (d/parse-integer p2))]
-    [basename 1]))
-
-(defn retrieve-used-names
-  [objects]
-  (into #{} (comp (map :name) (remove nil?)) (vals objects)))
-
-
-(defn generate-unique-name
-  "A unique name generator"
-  [used basename]
-  (s/assert ::set-of-string used)
-  (s/assert ::us/string basename)
-  (if-not (contains? used basename)
-    basename
-    (let [[prefix initial] (extract-numeric-suffix basename)]
-      (loop [counter initial]
-        (let [candidate (str prefix "-" counter)]
-          (if (contains? used candidate)
-            (recur (inc counter))
-            candidate))))))
 
 ;; --- Shape attrs (Layers Sidebar)
 
@@ -255,7 +229,7 @@
 
   ;; Calculate the frame over which we're drawing
   (let [position @ms/mouse-position
-        frame-id (:frame-id attrs (cph/frame-id-by-position objects position))
+        frame-id (:frame-id attrs (ctt/frame-id-by-position objects position))
         shape (when-not (empty? selected)
                 (cph/get-base-shape objects selected))]
 
@@ -304,8 +278,8 @@
 
              id       (or (:id attrs) (uuid/next))
              name     (-> objects
-                          (retrieve-used-names)
-                          (generate-unique-name (:name attrs)))
+                          (ctt/retrieve-used-names)
+                          (ctt/generate-unique-name (:name attrs)))
 
              shape (make-new-shape
                      (assoc attrs :id id :name name)
@@ -336,7 +310,7 @@
             to-move-shapes
             (into []
                   (map (d/getf objects))
-                  (reverse (cph/sort-z-index objects shapes)))
+                  (reverse (ctt/sort-z-index objects shapes)))
 
             changes
             (when (d/not-empty? to-move-shapes)
@@ -511,7 +485,7 @@
             y (:y data (- vbc-y (/ height 2)))
             page-id (:current-page-id state)
             frame-id (-> (wsh/lookup-page-objects state page-id)
-                         (cph/frame-id-by-position {:x frame-x :y frame-y}))
+                         (ctt/frame-id-by-position {:x frame-x :y frame-y}))
             shape (-> (cp/make-minimal-shape type)
                       (merge data)
                       (merge {:x x :y y})

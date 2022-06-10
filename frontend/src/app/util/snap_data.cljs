@@ -12,6 +12,7 @@
    [app.common.data :as d]
    [app.common.pages.diff :as diff]
    [app.common.pages.helpers :as cph]
+   [app.common.types.shape-tree :as ctt]
    [app.common.uuid :as uuid]
    [app.util.geom.grid :as gg]
    [app.util.geom.snap-points :as snap]
@@ -193,7 +194,7 @@
 (defn add-page
   "Adds page information"
   [snap-data {:keys [objects options] :as page}]
-  (let [frames     (cph/get-frames objects)
+  (let [frames     (ctt/get-frames objects)
         shapes     (->> (vals (:objects page))
                         (remove cph/frame-shape?))
         guides     (vals (:guides options))

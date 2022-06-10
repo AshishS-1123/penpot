@@ -10,8 +10,8 @@
    [app.common.geom.point :as gpt]
    [app.common.pages.helpers :as cph]
    [app.common.spec :as us]
+   [app.common.types.shape-tree :as ctt]
    [app.common.types.shape.interactions :as ctsi]
-   [app.common.uuid :as uuid]
    [app.main.data.comments :as dcm]
    [app.main.data.fonts :as df]
    [app.main.repo :as rp]
@@ -114,8 +114,8 @@
                    (map (fn [page-id]
                           (let [data (get-in file [:data :pages-index page-id])]
                             [page-id (assoc data
-                                            :frames (cph/get-viewer-frames (:objects data))
-                                            :all-frames (cph/get-viewer-frames (:objects data) {:all-frames? true}))])))
+                                            :frames (ctt/get-viewer-frames (:objects data))
+                                            :all-frames (ctt/get-viewer-frames (:objects data) {:all-frames? true}))])))
                    (into {}))]
 
     (ptk/reify ::bundle-fetched

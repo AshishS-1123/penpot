@@ -14,7 +14,9 @@
    [app.common.pages.changes-spec :as pcs]
    [app.common.pages.helpers :as cph]
    [app.common.spec :as us]
+   [app.common.types.container :as ctc]
    [app.common.types.file :as ctf]
+   [app.common.types.shape-tree :as ctt]
    [app.common.types.shape.color :as ctsc]
    [app.common.types.shape.typography :as ctst]
    [app.common.uuid :as uuid]
@@ -351,7 +353,7 @@
             component      (cph/get-component libraries id)
             all-components (-> state :workspace-data :components vals)
             unames         (into #{} (map :name) all-components)
-            new-name       (dwc/generate-unique-name unames (:name component))
+            new-name       (ctt/generate-unique-name unames (:name component))
 
             [new-shape new-shapes _updated-shapes main-instance main-instance-page]
             (dwlh/duplicate-component component)
@@ -524,7 +526,7 @@
             libraries     (wsh/get-libraries state)
 
             container     (cph/get-container local-file :page page-id)
-            shape         (cph/get-shape container id)
+            shape         (ctc/get-shape container id)
 
             changes
             (-> (pcb/empty-changes it)

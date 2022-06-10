@@ -12,10 +12,10 @@
    [app.common.pages.helpers :as cph]
    [app.common.spec :as us]
    [app.common.types.page :as ctp]
+   [app.common.types.shape-tree :as ctt]
    [app.common.types.shape.interactions :as ctsi]
    [app.common.uuid :as uuid]
    [app.main.data.workspace.changes :as dch]
-   [app.main.data.workspace.common :as dwc]
    [app.main.data.workspace.state-helpers :as wsh]
    [app.main.streams :as ms]
    [beicon.core :as rx]
@@ -32,7 +32,7 @@
 
             flows   (get-in page [:options :flows] [])
             unames  (into #{} (map :name flows))
-            name    (dwc/generate-unique-name unames "Flow-1")
+            name    (ctt/generate-unique-name unames "Flow-1")
 
             new-flow {:id (uuid/next)
                       :name name
@@ -182,7 +182,7 @@
             selected-shape (get objects selected-shape-id)
             selected-shape-frame-id (:frame-id selected-shape)
             start-frame (get objects selected-shape-frame-id)
-            end-frame   (cph/frame-by-position objects position)
+            end-frame   (ctt/frame-by-position objects position)
 
             position (when (not= position initial-pos) position)
             end-frame (when (and (not= (:id end-frame) uuid/zero )
@@ -209,7 +209,7 @@
       (let [position     @ms/mouse-position
             page-id      (:current-page-id state)
             objects      (wsh/lookup-page-objects state page-id)
-            target-frame (cph/frame-by-position objects position)
+            target-frame (ctt/frame-by-position objects position)
 
             shape-id     (-> state wsh/lookup-selected first)
             shape        (get objects shape-id)

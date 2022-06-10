@@ -11,6 +11,7 @@
    [app.common.pages :as cp]
    [app.common.pages.changes-builder :as pcb]
    [app.common.pages.helpers :as cph]
+   [app.common.types.shape-tree :as ctt]
    [app.main.data.workspace.changes :as dch]
    [app.main.data.workspace.common :as dwc]
    [app.main.data.workspace.state-helpers :as wsh]
@@ -70,8 +71,8 @@
                            (= (count shapes) 1)
                            (= (:type (first shapes)) :group))
                     (:name (first shapes))
-                    (-> (dwc/retrieve-used-names objects)
-                        (dwc/generate-unique-name base-name)))
+                    (-> (ctt/retrieve-used-names objects)
+                        (ctt/generate-unique-name base-name)))
 
         selrect   (gsh/selection-rect shapes)
         group     (-> (cp/make-minimal-group frame-id selrect gname)

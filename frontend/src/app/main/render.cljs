@@ -21,6 +21,7 @@
    [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
    [app.common.pages.helpers :as cph]
+   [app.common.types.shape-tree :as ctst]
    [app.config :as cfg]
    [app.main.fonts :as fonts]
    [app.main.ui.context :as muc]
@@ -62,7 +63,7 @@
 (defn- calculate-dimensions
   [objects]
   (let [rect
-        (->> (cph/get-root-objects objects)
+        (->> (ctst/get-root-objects objects)
              (map #(if (some? (:children-bounds %))
                      (:children-bounds %)
                      (gsh/points->selrect (:points %))))
