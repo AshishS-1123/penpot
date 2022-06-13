@@ -11,18 +11,9 @@
    [app.common.exceptions :as ex]
    [app.common.geom.shapes :as gsh]
    [app.common.pages.common :refer [file-version default-color]]
+   [app.common.types.page :as ctp]
+   [app.common.types.pages-list :as ctpl]
    [app.common.uuid :as uuid]))
-
-(def root uuid/zero)
-
-(def empty-page-data
-  {:options {}
-   :name "Page-1"
-   :objects
-   {root
-    {:id root
-     :type :frame
-     :name "Root Frame"}}})
 
 (def empty-file-data
   {:version file-version
@@ -140,13 +131,10 @@
    (make-file-data file-id (uuid/next)))
 
   ([file-id page-id]
-   (let [pd (assoc empty-page-data
-                   :id page-id
-                   :name "Page-1")]
+   (let [page (ctp/make-empty-page page-id "Page-1")]
      (-> empty-file-data
          (assoc :id file-id)
-         (update :pages conj page-id)
-         (update :pages-index assoc page-id pd)))))
+         (ctpl/add-page page)))))
 
 (defn setup-rect-selrect
   "Initializes the selrect and points for a shape"
