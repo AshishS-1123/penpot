@@ -13,7 +13,7 @@
    [app.config :as cf]
    [app.db :as db]
    [app.db.sql :as sql]
-   [app.rpc.mutations.files :as m.files]
+   [app.rpc.mutations.files :refer [create-file]]
    [app.rpc.queries.profile :as profile]
    [app.http.debug.export :as dbg-export]
    [app.util.blob :as blob]
@@ -34,7 +34,7 @@
    [yetti.request :as yrq]
    [yetti.response :as yrs]))
 
-;; (selmer.parser/cache-off!)
+(selmer.parser/cache-off!)
 
 (defn authorized?
   [pool {:keys [profile-id]}]
@@ -89,7 +89,7 @@
                  (some-> (db/exec-one! pool [sql:retrieve-single-change file-id revn]) :data)
                  (some-> (db/get-by-id pool :file file-id) :data))]
 
-      (when-not body
+      (when-not data
         (ex/raise :type :not-found
                   :code :enpty-data
                   :hint "empty response"))
@@ -98,27 +98,38 @@
         (prepare-download-response data filename)
         (prepare-response (some-> data blob/decode))))))
 
+(defn- is-file-exists?
+  [pool id]
+  (let [sql "select exists (select 1 from file where id=?) as exists;"]
+    (-> (db/exec-one! pool [sql id]) :exists)))
+
 (defn- upload-file-data
   [{:keys [pool]} {:keys [profile-id params] :as request}]
   (let [project-id (some-> (profile/retrieve-additional-data pool profile-id) :default-project-id)
         data       (some-> params :file :path fs/slurp-bytes blob/decode)]
 
     (if (and data project-id)
-      (let [fname (str "imported-file-" (dt/now))
-            file-id (try
-                      (uuid/uuid (-> params :file :filename))
-                      (catch Exception _ (uuid/next)))
-            file (db/exec-one! pool (sql/select :file {:id file-id}))]
-        (if file
-          (db/update! pool :file
-                      {:data (blob/encode data)}
-                      {:id file-id})
-          (m.files/create-file pool {:id file-id
-                                     :name fname
-                                     :project-id project-id
-                                     :profile-id profile-id
-                                     :data data}))
-        (yrs/response 200 "OK"))
+      (let [fname   (str "imported-file-" (dt/now))
+            reuse?  (contains? params :reuseid)
+            file-id (or (and reuse? (ex/ignoring (-> params :file :filename uuid/uuid)))
+                        (uuid/next))]
+
+        (if (and reuse? file-id
+                 (is-file-exists? pool file-id))
+          (do
+            (db/update! pool :file
+                        {:data (blob/encode data)}
+                        {:id file-id})
+            (yrs/response 200 "OK UPDATED"))
+
+          (do
+            (create-file pool {:id file-id
+                               :name fname
+                               :project-id project-id
+                               :profile-id profile-id
+                               :data data})
+            (yrs/response 201 "OK CREATED"))))
+
       (yrs/response 500 "ERROR"))))
 
 (defn file-data
@@ -261,6 +272,4 @@
    :retrieve-error (wrap-async cfg retrieve-error)
    :retrieve-error-list (wrap-async cfg retrieve-error-list)
    :file-data (wrap-async cfg file-data)
-   :changelog (wrap-async cfg changelog)
-   :export (wrap-async cfg dbg-export/handler cfg)
-   :import (wrap-async cfg dbg-export/import-handler)})
+   :changelog (wrap-async cfg changelog)})

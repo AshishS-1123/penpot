@@ -95,6 +95,7 @@ nav > div:not(:last-child) {
 
 .index {
   margin-top: 40px;
+  display: flex;
 }
 
 .index > section {
@@ -102,9 +103,13 @@ nav > div:not(:last-child) {
   background-color: #e3e3e3;
 }
 
-.index > section:not(:last-child) {
-  margin-bottom: 10px;
+.index fieldset:not(:first-child) {
+  margin-top: 15px;
 }
+
+/* .index > section:not(:last-child) { */
+/*   margin-bottom: 10px; */
+/* } */
 
 
 .index > section > h2 {
@@ -146,5 +151,9 @@ nav > div:not(:last-child) {
 .horizontal-list li > a {
   text-decoration: none;
   color: inherit;
+}
+
+form .row {
+  padding: 5px 0;
 }
 
