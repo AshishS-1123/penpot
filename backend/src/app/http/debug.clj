@@ -72,7 +72,7 @@
     (yrs/response :status 200 :body body :headers headers)))
 
 (defn- retrieve-file-data
-  [{:keys [pool]} {:keys [params] :as request}]
+  [{:keys [pool]} {:keys [params profile-id] :as request}]
   (when-not (authorized? pool request)
     (ex/raise :type :authentication
               :code :only-admins-allowed))
@@ -94,8 +94,22 @@
                   :code :enpty-data
                   :hint "empty response"))
 
-      (if (contains? params :download)
+      (cond
+        (contains? params :download)
         (prepare-download-response data filename)
+
+        (contains? params :clone)
+        (let [project-id (some-> (profile/retrieve-additional-data pool profile-id) :default-project-id)
+              data       (some-> params :file :path fs/slurp-bytes blob/decode)
+              fname      (str "imported-file-" (dt/now))]
+          (create-file pool {:id (uuid/next)
+                             :name fname
+                             :project-id project-id
+                             :profile-id profile-id
+                             :data data})
+          (yrs/response 201 "OK CREATED"))
+
+        :else
         (prepare-response (some-> data blob/decode))))))
 
 (defn- is-file-exists?
