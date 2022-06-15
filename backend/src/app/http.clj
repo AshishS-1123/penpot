@@ -179,6 +179,7 @@
                         :allowed-methods #{:post}}]
 
       ["/rpc"
+       ["/command/:command" {:handler (:command-handler rpc)}]
        ["/query/:type" {:handler (:query-handler rpc)}]
        ["/mutation/:type" {:handler (:mutation-handler rpc)
                            :allowed-methods #{:post}}]]]]]))

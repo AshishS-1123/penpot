@@ -93,7 +93,6 @@
         (ex/raise :type :not-found
                   :code :enpty-data
                   :hint "empty response"))
-
       (cond
         (contains? params :download)
         (prepare-download-response data filename)
