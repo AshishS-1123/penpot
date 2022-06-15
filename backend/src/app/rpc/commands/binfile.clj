@@ -63,7 +63,7 @@
     :stream  3
     :uuid    4
     :label   5
-    :map     6
+    :obj     6
     (ex/raise :type :assertion
               :code :invalid-mark-id
               :hint (format "invalid mark id %s" id))))
@@ -134,54 +134,6 @@
 
 ;; --- COMPOSITE
 
-(defn write-uuid!
-  [^DataOutputStream ostream id]
-  (doto ostream
-    (write-byte! (get-mark :uuid))
-    (write-long! (uuid/get-word-high id))
-    (write-long! (uuid/get-word-low id))))
-
-(defn read-uuid!
-  [^DataInputStream istream]
-  (let [m (read-byte! istream)]
-    (assert-mark m :uuid)
-    (let [a (read-long! istream)
-          b (read-long! istream)]
-      (uuid/custom a b))))
-
-(defn write-map!
-  [^DataOutputStream ostream data]
-  (let [^bytes data (if (bytes? data) data (blob/encode data))]
-    (doto ostream
-      (write-byte! (get-mark :map))
-      (write-long! (alength data))
-      (write-bytes! data))))
-
-(defn read-map!
-  [^DataInputStream istream]
-  (let [m (read-byte! istream)]
-    (assert-mark m :map)
-    (let [size (read-long! istream)]
-      (assert (pos? dlen) "incorrect header size found on reading header")
-      (let [buff (byte-array size)]
-        (read-bytes! istream buff)
-        (fres/decode buff)))))
-
-(defn write-header!
-  [^DataOutputStream ostream data]
-  (doto ostream
-    (write-byte! (get-mark :header))
-    (write-long! penpot-magic-number)
-    (write-map! data)))
-
-(defn read-header!
-  [^DataInputStream istream]
-  (let [mrk (read-byte! istream)
-        mnb (read-long! istream)]
-    (assert-mark mrk :header)
-    (assert (= mnb penpot-magic-number) "invalid magic number on parsing header")
-    (read-map! istream)))
-
 (defn write-label!
   [^DataOutputStream ostream label]
   (let [^String label (if (keyword? label) (name label) label)
@@ -199,6 +151,86 @@
           buff (byte-array size)]
       (read-bytes! istream buff)
       (keyword (String. buff "UTF-8")))))
+
+(defn write-uuid!
+  [^DataOutputStream ostream id]
+  (doto ostream
+    (write-byte! (get-mark :uuid))
+    (write-long! (uuid/get-word-high id))
+    (write-long! (uuid/get-word-low id))))
+
+(defn read-uuid!
+  [^DataInputStream istream]
+  (let [m (read-byte! istream)]
+    (assert-mark m :uuid)
+    (let [a (read-long! istream)
+          b (read-long! istream)]
+      (uuid/custom a b))))
+
+(defn write-obj!
+  [^DataOutputStream ostream data]
+  (let [^bytes data (fres/encode data)]
+    (doto ostream
+      (write-byte! (get-mark :obj))
+      (write-long! (alength data))
+      (write-bytes! data))))
+
+(defn read-obj!
+  [^DataInputStream istream]
+  (let [m (read-byte! istream)]
+    (assert-mark m :obj)
+    (let [size (read-long! istream)]
+      (assert (pos? dlen) "incorrect header size found on reading header")
+      (let [buff (byte-array size)]
+        (read-bytes! istream buff)
+        (fres/decode buff)))))
+
+(defn write-obj-with-label!
+  [ostream label data]
+  (write-label! ostream label)
+  (write-obj! ostream data))
+
+(defn read-obj-with-label!
+  [ostream expected-label]
+  (let [label (read-label! ostream)]
+    (assert-label expected-label label)
+    (read-obj! ostream)))
+
+(defn write-header!
+  [^DataOutputStream ostream data]
+  (doto ostream
+    (write-byte! (get-mark :header))
+    (write-long! penpot-magic-number)
+    (write-obj! data)))
+
+(defn read-header!
+  [^DataInputStream istream]
+  (let [mrk (read-byte! istream)
+        mnb (read-long! istream)]
+    (assert-mark mrk :header)
+    (assert (= mnb penpot-magic-number) "invalid magic number on parsing header")
+    (read-obj! istream)))
+
+(defn write-blob!
+  [^DataOutputStream ostream data]
+  (let [^bytes data (if (bytes? data) data (blob/encode data))]
+    (doto ostream
+      (write-byte! (get-mark :blob))
+      (write-long! (alength data))
+      (write-bytes! data))))
+
+(defn read-blob!
+  ([istream] (read-blob! istream false))
+  ([^DataInputStream istream decode?]
+   (let [m (read-byte! istream)]
+     (assert-mark m :blob)
+     (let [size (read-long! istream)]
+       (assert (pos? dlen) "incorrect header size found on reading header")
+       (let [buff (byte-array size)]
+         (read-bytes! istream buff)
+         (if decode?
+           (blob/decode buff)
+           buff))))))
 
 (defn copy-stream!
   [^DataOutputStream ostream ^InputStream stream ^long size]
@@ -239,10 +271,9 @@
         (db/exec! conn [sql (db/create-array conn "uuid" ids)])))))
 
 (defn write-export!
-  [{:keys [pool storage file-id]} ^DataOutputStream ostream]
-  (let [{:keys [data] :as file} (db/get-by-id pool :file file-id)
-
-        fdata   (blob/decode data)
+  [{:keys [pool storage]} & {:keys [ostream file-id]}]
+  (let [file    (db/get-by-id pool :file file-id)
+        fdata   (blob/decode (:data file))
         storage (media/configure-assets-storage storage)
         fmedia  (get-used-media pool fdata)
         sids    (into [] storage-object-id-xf fmedia)]
@@ -251,24 +282,32 @@
       (write-header! {:version 1 :total-files 1 :sw-version (:full cf/version)})
       (write-label! :files))
 
-    (doseq [file [file]]
-      (write-
+    (doto ostream
+      (write-label! :file)
+      (write-obj! (dissoc file :data)))
 
+    (doto ostream
+      (write-label! :fdata)
+      (write-obj! fdata))
 
-      (write-blob! :file (dissoc file :data))
-      (write-blob! :fdata data)
-      (write-blob! :fmedia fmedia)
-      (write-blob! :sids sids))
+    (doto ostream
+      (write-label! :fmedia)
+      (write-obj! fmedia))
 
+    (doto ostream
+      (write-label! :sids)
+      (write-obj! sids))
+
+    (write-label! :sobjects)
     (doseq [id sids]
       (let [{:keys [size] :as obj} (sto/get-object storage id)]
         (doto ostream
           (write-uuid! id)
-          (write-blob! :storage-object obj)
-          (write-blob! :storage-metadata (meta obj)))
+          (write-obj! obj)
+          (write-obj! (meta obj)))
 
         (with-open [^InputStream stream (sto/get-object-data storage obj)]
-          (write-stream! ostream :storage-object-data stream size))))))
+          (write-stream! ostream stream size))))))
 
 ;; --- Command: export-binfile
 
