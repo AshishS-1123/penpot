@@ -179,12 +179,6 @@ msgstr "הקישור הועתק בהצלחה"
 msgid "common.share-link.link-deleted-success"
 msgstr "הקישור נמחק בהצלחה"
 
-msgid "common.share-link.permissions-can-access"
-msgstr "יש גישה"
-
-msgid "common.share-link.permissions-can-view"
-msgstr "אפשר לצפות"
-
 msgid "common.share-link.permissions-hint"
 msgstr "כל מי שיש לו את הקישור יכול לגשת"
 
@@ -196,15 +190,6 @@ msgstr "הסרת קישור"
 
 msgid "common.share-link.title"
 msgstr "שיתוף אבות טיפוס"
-
-msgid "common.share-link.view-all-pages"
-msgstr "כל העמודים"
-
-msgid "common.share-link.view-current-page"
-msgstr "רק העמוד הזה"
-
-msgid "common.share-link.view-selected-pages"
-msgstr "עמודים נבחרים"
 
 #: src/app/main/ui/workspace/header.cljs,
 #: src/app/main/ui/dashboard/file_menu.cljs
