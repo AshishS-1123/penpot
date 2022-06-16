@@ -101,6 +101,9 @@ nav > div:not(:last-child) {
 .index > section {
   padding: 10px;
   background-color: #e3e3e3;
+  max-width: 400px;
+  margin: 5px;
+  height: fit-content;
 }
 
 .index fieldset:not(:first-child) {

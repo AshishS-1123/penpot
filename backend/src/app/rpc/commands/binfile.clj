@@ -21,12 +21,13 @@
    [app.media :as media]
    [app.rpc.mutations.files :refer [create-file]]
    [app.rpc.queries.comments :as comments]
-   [app.rpc.queries.files :as files]
+   [app.rpc.queries.files :refer [decode-row]]
    [app.rpc.queries.profile :as profile]
    [app.rpc.retry :as retry]
    [app.storage :as sto]
    [app.tasks.file-gc]
    [app.util.fressian :as fres]
+   [app.util.blob :as blob]
    [app.util.services :as sv]
    [app.util.time :as dt]
    [clojure.java.io :as io]
@@ -54,6 +55,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def ^:const buffer-size (:xnio/buffer-size yt/defaults))
+(def ^:const penpot-magic-number 800099563638710213)
 
 (defn get-mark
   [id]
@@ -64,7 +66,7 @@
     :uuid    4
     :label   5
     :obj     6
-    (ex/raise :type :assertion
+    (ex/raise :type :validation
               :code :invalid-mark-id
               :hint (format "invalid mark id %s" id))))
 
@@ -83,25 +85,27 @@
 (defmacro assert
   [expr hint]
   `(when-not ~expr
-     (ex/raise :type :assertion
+     (ex/raise :type :validation
                :code :unexpected-condition
                :hint ~hint)))
 
 (defmacro assert-mark
   [v type]
   `(let [expected# (get-mark type)
-         val#      (long v)]
+         val#      (long ~v)]
     (when (not= val# expected#)
-      (ex/raise :type :assertion
+      (ex/raise :type :validation
                 :code :unexpected-mark
                 :hint (format "received mark %s, expected %s" val# expected#)))))
 
-(defn assert-label
-  [n label]
-  (when (not= n label)
-    (ex/raise :type :assertion
-              :code :unexpected-label
-              :hint (format "received label %s, expected %s" n label))))
+(defmacro assert-label
+  [~expr label]
+  `(let [v# ~expr]
+     (when (not= v# ~label)
+       (ex/raise :type :assertion
+                 :code :unexpected-label
+                 :hint (format "received label %s, expected %s" v# ~label)))))
+
 
 ;; --- PRIMITIVE
 
@@ -132,8 +136,6 @@
   [^DataInputStream istream ^bytes buff]
   (.read istream buff 0 (alength buff)))
 
-;; --- COMPOSITE
-
 (defn write-label!
   [^DataOutputStream ostream label]
   (let [^String label (if (keyword? label) (name label) label)
@@ -151,6 +153,17 @@
           buff (byte-array size)]
       (read-bytes! istream buff)
       (keyword (String. buff "UTF-8")))))
+
+;; --- COMPOSITE
+
+(defmacro assert-read-label!
+  [istream expected-label]
+  `(let [readed# (readed-label! ~istream)
+         expected# ~expected-label]
+     (when (not= readed# expected#)
+       (ex/raise :type :validation
+                 :code :unexpected-label
+                 :hint (format "unxpected label found: %s, expected: %s" readed# expected#)))))
 
 (defn write-uuid!
   [^DataOutputStream ostream id]
@@ -180,7 +193,7 @@
   (let [m (read-byte! istream)]
     (assert-mark m :obj)
     (let [size (read-long! istream)]
-      (assert (pos? dlen) "incorrect header size found on reading header")
+      (assert (pos? size) "incorrect header size found on reading header")
       (let [buff (byte-array size)]
         (read-bytes! istream buff)
         (fres/decode buff)))))
@@ -192,9 +205,8 @@
 
 (defn read-obj-with-label!
   [ostream expected-label]
-  (let [label (read-label! ostream)]
-    (assert-label expected-label label)
-    (read-obj! ostream)))
+  (assert-label (read-label! ostream) expected-label)
+  (read-obj! ostream))
 
 (defn write-header!
   [^DataOutputStream ostream data]
@@ -225,7 +237,7 @@
    (let [m (read-byte! istream)]
      (assert-mark m :blob)
      (let [size (read-long! istream)]
-       (assert (pos? dlen) "incorrect header size found on reading header")
+       (assert (pos? size) "incorrect header size found on reading header")
        (let [buff (byte-array size)]
          (read-bytes! istream buff)
          (if decode?
@@ -257,57 +269,152 @@
 ;; HIGH LEVEL IMPL
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def penpot-magic-number 800099563638710213)
+(defn- retrieve-file
+  [pool file-id]
+  (->> (db/query pool :file {:id file-id})
+       (map decode-row)
+       (first)))
 
-(def storage-object-id-xf
-  (comp (mapcat (juxt :media-id :thumbnail-id))
-        (filter uuid?)))
+(def ^:private sql:file-media-objects
+  "SELECT * FROM file_media_object WHERE id = ANY(?)")
 
-(defn get-used-media
-  [pool fdata]
-  (let [ids (app.tasks.file-gc/collect-used-media fdata)]
-    (with-open [conn (db/open pool)]
-      (let [sql "select * from file_media_object where id = ANY(?)"]
-        (db/exec! conn [sql (db/create-array conn "uuid" ids)])))))
+(defn- retrieve-file-media
+  [pool {:keys [data] :as file}]
+  (with-open [conn (db/open pool)]
+    (let [ids (app.tasks.file-gc/collect-used-media data)
+          ids (db/create-array conn "uuid" ids)]
+      (db/exec! conn [sql:file-media-objects ids]))))
+
+(def ^:private storage-object-id-xf
+  (comp
+   (mapcat (juxt :media-id :thumbnail-id))
+   (filter uuid?)))
+
+(def ^:private sql:file-libraries
+  "WITH RECURSIVE libs AS (
+     SELECT fl.id, fl.deleted_at
+       FROM file AS fl
+       JOIN file_library_rel AS flr ON (flr.library_file_id = fl.id)
+      WHERE flr.file_id = ?::uuid
+    UNION
+     SELECT fl.id, fl.deleted_at
+       FROM file AS fl
+       JOIN file_library_rel AS flr ON (flr.library_file_id = fl.id)
+       JOIN libs AS l ON (flr.file_id = l.id)
+   )
+   SELECT DISTINCT l.id
+     FROM libs AS l
+    WHERE l.deleted_at IS NULL OR l.deleted_at > now();")
+
+(defn- retrieve-libraries
+  [pool file-id]
+  (map :id (db/exec! pool [sql:file-libraries file-id])))
+
+(def ^:private sql:file-library-rels
+  "SELECT * FROM file_library_rel
+    WHERE file_id = ANY(?)")
+
+(defn- retrieve-library-relations
+  [pool ids]
+  (with-open [conn (db/open pool)]
+    (db/exec! conn [sql:file-library-rels (db/create-array conn "uuid" ids)])))
 
 (defn write-export!
-  [{:keys [pool storage]} & {:keys [ostream file-id]}]
-  (let [file    (db/get-by-id pool :file file-id)
-        fdata   (blob/decode (:data file))
-        storage (media/configure-assets-storage storage)
-        fmedia  (get-used-media pool fdata)
-        sids    (into [] storage-object-id-xf fmedia)]
+  [{:keys [pool storage ::ostream ::file-id ::include-libraries?]
+    :or {include-libraries? false}}]
+  (let [libs    (when include-libraries?
+                  (retrieve-libraries pool file-id))
+        rels    (when include-libraries?
+                  (retrieve-library-relations pool libs))
+        sids    (atom #{})]
 
+    ;; Write header with metadata
     (doto ostream
-      (write-header! {:version 1 :total-files 1 :sw-version (:full cf/version)})
-      (write-label! :files))
+      (write-header! {:version 1
+                      :sw-version (:full cf/version)}))
 
+    ;; Write all files & libs (without filedata)
     (doto ostream
-      (write-label! :file)
-      (write-obj! (dissoc file :data)))
+      (write-label! :main)
+      (write-uuid! file-id)
+      (write-obj! libs)
+      (write-obj! rels))
 
+    ;; Write all filedata of all files (libraries including)
     (doto ostream
       (write-label! :fdata)
-      (write-obj! fdata))
+      (write-long! (inc (count libs))))
 
-    (doto ostream
-      (write-label! :fmedia)
-      (write-obj! fmedia))
+    (doseq [file-id (cons file-id libs)]
+      (let [file  (retrieve-file pool file-id)
+            media (retrieve-file-media pool file)]
 
-    (doto ostream
-      (write-label! :sids)
-      (write-obj! sids))
+        ;; Collect all storage ids for later write them all under
+        ;; specific storage objects section.
+        (swap! sids into (sequence storage-object-id-xf media))
 
-    (write-label! :sobjects)
-    (doseq [id sids]
-      (let [{:keys [size] :as obj} (sto/get-object storage id)]
         (doto ostream
-          (write-uuid! id)
-          (write-obj! obj)
-          (write-obj! (meta obj)))
+          (write-uuid! file-id)
+          (write-obj! file)
+          (write-obj! media))))
 
-        (with-open [^InputStream stream (sto/get-object-data storage obj)]
-          (write-stream! ostream stream size))))))
+    ;; Write all collected storage objects
+    (doto ostream
+      (write-label! :sobjects)
+      (write-obj! @sids))
+
+    (let [storage (media/configure-assets-storage storage)]
+      (doseq [id @sids]
+        (let [{:keys [size] :as obj} @(sto/get-object storage id)]
+          (doto ostream
+            (write-uuid! id)
+            (write-obj! obj)
+            (write-obj! (meta obj)))
+
+          (with-open [^InputStream stream @(sto/get-object-data storage obj)]
+            (write-stream! ostream stream size)))))))
+
+;; TODO: add progress (?)
+
+(defn export-files-response
+  [cfg]
+  (reify yrs/StreamableResponseBody
+    (-write-body-to-stream [_ _ output-stream]
+      (time
+       (try
+         (with-open [ostream (ZstdOutputStream. output-stream 6)]
+           (with-open [ostream (DataOutputStream. ostream)]
+             (write-export! (assoc cfg ::ostream ostream))))
+
+         (catch java.io.IOException _cause
+           ;; Do nothing, EOF means client closes connection abruptly
+           nil)
+         (catch Throwable cause
+           (l/warn :hint "unexpected error on encoding response"
+                   :cause cause))
+         (finally
+           (.close ^OutputStream output-stream)))))))
+
+
+
+(defn read-import!
+  [{:keys [pool storage ::profile-id ::project-id ::istream] :as cfg}]
+  ;; Verify that we received a proper .penpot file
+  (try
+    (read-header! istream)
+    (catch Throwable _cause
+      (ex/raise :type :validation
+                :code :invalid-penpot-file)))
+
+  (assert-read-label! istream :main)
+
+  (db/with-atomic [conn pool]
+    (let [storage (media/configure-assets-storage storage conn)
+
+
+
+
+
 
 ;; --- Command: export-binfile
 

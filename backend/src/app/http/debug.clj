@@ -285,4 +285,6 @@
    :retrieve-error (wrap-async cfg retrieve-error)
    :retrieve-error-list (wrap-async cfg retrieve-error-list)
    :file-data (wrap-async cfg file-data)
-   :changelog (wrap-async cfg changelog)})
+   :changelog (wrap-async cfg changelog)
+
+   :export (wrap-async cfg dbg-export/export-handler)})

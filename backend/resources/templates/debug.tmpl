@@ -41,5 +41,29 @@ Debug Main Page
       </form>
     </fieldset>
   </section>
+
+  <section class="widget">
+    <fieldset>
+      <legend>Export binfile:</legend>
+      <desc>Given an FILE-ID, downloads the file and optionally all
+      the related libraries in a single custom formatted binary
+      file.</desc>
+
+      <form method="get" action="/dbg/file/export">
+        <div class="row">
+          <input type="text" style="width:300px" name="file-id" placeholder="file-id" />
+        </div>
+
+        <div class="row">
+          <label>Include libraries?</label>
+          <input type="checkbox" name="includelibs" />
+        </div>
+
+        <div class="row">
+          <input type="submit" name="download" value="Download" />
+        </div>
+      </form>
+    </fieldset>
+  </section>
 </main>
 {% endblock %}
