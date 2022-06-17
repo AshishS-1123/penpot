@@ -1,0 +1,5 @@
+ALTER TABLE file_media_object
+ALTER CONSTRAINT file_media_object_media_id_fkey DEFERRABLE INITIALLY IMMEDIATE;
+
+ALTER TABLE file_media_object
+ALTER CONSTRAINT file_media_object_thumbnail_id_fkey DEFERRABLE INITIALLY IMMEDIATE;
