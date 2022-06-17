@@ -24,16 +24,11 @@
 (log/set-level! :warn)
 
 (defn prepare-params
-  [{:keys [sections pages pages-mode _who-comment _who-inspect]}]
-  ;; When backend is ready change flags and remove keys
-  ;; {:pages pages
-  ;;  :flags {:who-comment who-comment
-  ;;          :who-inspect who-inspect}}
-
-  {:pages pages
-   :flags (-> #{}
-              (into (map #(str "section-" %)) sections)
-              (into (map #(str "pages-" %)) [pages-mode]))})
+  [{:keys [pages who-comment who-inspect]}]
+  
+   {:pages pages
+    :who-comment who-comment
+    :who-inspect who-inspect})
 
 
 
