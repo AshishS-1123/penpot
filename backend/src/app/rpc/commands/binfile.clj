@@ -156,15 +156,6 @@
 
 ;; --- COMPOSITE
 
-(defmacro assert-read-label!
-  [istream expected-label]
-  `(let [readed# (readed-label! ~istream)
-         expected# ~expected-label]
-     (when (not= readed# expected#)
-       (ex/raise :type :validation
-                 :code :unexpected-label
-                 :hint (format "unxpected label found: %s, expected: %s" readed# expected#)))))
-
 (defn write-uuid!
   [^DataOutputStream ostream id]
   (doto ostream
@@ -219,8 +210,10 @@
   [^DataInputStream istream]
   (let [mrk (read-byte! istream)
         mnb (read-long! istream)]
-    (assert-mark mrk :header)
-    (assert (= mnb penpot-magic-number) "invalid magic number on parsing header")
+    (when (or (not= mrk (get-mark :header))
+              (not= mnb penpot-magic-number))
+      (ex/raise :type :validation
+                :code :invalid-penpot-file))
     (read-obj! istream)))
 
 (defn write-blob!
@@ -264,6 +257,15 @@
     (let [size (read-long! istream)]
       [size (doto (BoundedInputStream. istream size)
               (.setPropagateClose false))])))
+
+(defmacro assert-read-label!
+  [istream expected-label]
+  `(let [readed# (readed-label! ~istream)
+         expected# ~expected-label]
+     (when (not= readed# expected#)
+       (ex/raise :type :validation
+                 :code :unexpected-label
+                 :hint (format "unxpected label found: %s, expected: %s" readed# expected#)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; HIGH LEVEL IMPL
@@ -333,18 +335,15 @@
       (write-header! {:version 1
                       :sw-version (:full cf/version)}))
 
-    ;; Write all files & libs (without filedata)
+    ;; Write :main section
     (doto ostream
       (write-label! :main)
       (write-uuid! file-id)
       (write-obj! libs)
       (write-obj! rels))
 
-    ;; Write all filedata of all files (libraries including)
-    (doto ostream
-      (write-label! :fdata)
-      (write-long! (inc (count libs))))
-
+    ;; Write :files section
+    (write-label! ostream :files)
     (doseq [file-id (cons file-id libs)]
       (let [file  (retrieve-file pool file-id)
             media (retrieve-file-media pool file)]
@@ -396,20 +395,175 @@
            (.close ^OutputStream output-stream)))))))
 
 
+;; storage (media/configure-assets-storage storage conn)
 
 (defn read-import!
-  [{:keys [pool storage ::profile-id ::project-id ::istream] :as cfg}]
+  [{:keys [pool storage ::profile-id ::project-id ::istream ::remap-ids?]
+    :or {remap-ids? true}
+    :as cfg}]
   ;; Verify that we received a proper .penpot file
-  (try
-    (read-header! istream)
-    (catch Throwable _cause
-      (ex/raise :type :validation
-                :code :invalid-penpot-file)))
+  (read-header! istream)
 
+  ;; Veirify that the following sectionis :main
   (assert-read-label! istream :main)
 
-  (db/with-atomic [conn pool]
-    (let [storage (media/configure-assets-storage storage conn)
+
+  (letfn [(lookup-index [id index]
+            (or (get index id)
+                (ex/raise :type :validation
+                          :code :incomplete-index
+                          :hint "looks like index has missing data")))
+
+          (process-map-form [index form]
+            (cond-> form
+              ;; Relink Image Shapes
+              (and (map? (:metadata form))
+                   (= :image (:type form)))
+              (update-in [:metadata :id] lookup-index index)
+
+              ;; This covers old shapes and the new :fills.
+              (uuid? (:fill-color-ref-file form))
+              (update form :fill-color-ref-file lookup-index index)
+
+              ;; This covers the old shapes and the new :strokes
+              (uuid? (:storage-color-ref-file form))
+              (update form :stroke-color-ref-file lookup-index index)
+
+              ;; This covers all text shapes that have typography referenced
+              (uuid? (:typography-ref-file form))
+              (update form :typography-ref-file lookup-index index)
+
+              ;; This covers the shadows and grids (they have directly
+              ;; the :file-id prop)
+              (uuid? (:file-id form))
+              (update form :stroke-color-ref-file lookup-index index)))
+
+          ;; a function responsible to analyze all file data and
+          ;; replace the old :component-file reference with the new
+          ;; ones, using the provided file-index
+          (relink-shapes [data index]
+            (walk/postwalk (fn [form]
+                             (if (map? form)
+                               (process-map-form index form)
+                               form))
+                           data))
+
+          ;; A function responsible of process the :media attr of file
+          ;; data and remap the old ids with the new ones.
+          (relink-media [media index]
+            (reduce-kv (fn [res k v]
+                         (let [id (get index k)]
+                           (if (uuid? id)
+                             (-> res
+                                 (assoc id (assoc v :id id))
+                                 (dissoc k))
+                             res)))
+                       media
+                       media))]
+
+    ;; Read the main section
+    (db/with-atomic [conn pool]
+      (db/exec-one! conn ["SET CONSTRAINTS ALL DEFERRED"])
+
+      (let [file-id (read-uuid! ostream)
+            libs    (read-obj! ostream)
+            rels    (read-obj! ostream)
+
+            idx-xf  (if remap-ids?
+                      (map #(vector % (uuid/next)))
+                      (map #(vector % %)))
+
+            index   (volatile!
+                     (-> {}
+                         (into idx-xf [file-id])
+                         (into idx-xf libs)
+                         (into idx-xf rels)))
+
+            lookup  (fn [id] (get @index id))
+            media   (volatile! [])]
+
+        ;; WARNING: reusing ids is dangerous operation, it will replace
+        ;; all objects that already exists on the platform.
+
+        (when-not remap-ids?
+          (db/exec! conn ["DELETE FROM file WHERE id = ANY(?)"
+                          (db/create-array conn "uuid" (cons file-id libs))]))
+
+        ;; Insert all file relations
+        (doseq [rel rels]
+          (db/insert! conn :file-library-rel
+                      (-> rel
+                          (update :file-id lookup)
+                          (update :library-file-id lookup))
+                      #_{:on-conflict-do-nothing (not remap-ids?)}))
+
+        ;; Process/Read all file
+        (doseq [expected-file-id (cons file-id libs)]
+          (let [file-id (read-uuid! ostream)
+                file    (read-obj! ostream)
+                media'  (read-obj! ostream)]
+
+            (when (not= file-id expected-file-id)
+              (ex/raise :type :validation
+                        :code :inconsistent-penpot-file
+                        :hint "the penpot file seems corrupt, found unexpected uuid (file-id)"))
+
+            ;; Update index using with media
+            (vswap! index into (comp idx-xf (map :id)) media')
+
+            ;; Store file media for later insertion
+            (vswap! media into (map #(update % :id lookup)) media')
+
+            (let [data (-> (:data file)
+                           (assoc :id (lookup file-id))
+                           (cond-> migrate? (pmg/migrate-data))
+                           (update :pages-index relink-shapes @index)
+                           (update :components relink-shapes @index)
+                           (update :media relink-media index))]
+
+              ;; TOOD: preserve more fields?
+              (create-file conn {:id (lookup file-id)
+                                 :name (:name file)
+                                 :project-id project-id
+                                 :profile-id profile-id
+                                 :data (blob/encode (:data file))}))))
+
+        (assert-read-label! istream :sobjects)
+        (let [sids (read-obj! istream)]
+
+          ;; Step 1: process all storage objects
+          (doseq [expected-storage-id sids]
+            (let [id    (read-uuid! istream)
+                  obj   (read-obj! istream)
+                  mdata (read-obj! istream)]
+
+              (when (not= id expected-storage-id)
+                (ex/raise :type :validation
+                          :code :inconsistent-penpot-file
+                          :hint "the penpot file seems corrupt, found unexpected uuid (storage-object-id)"))
+
+              (let [[size stream] (read-stream! istream :storage-object-data)
+                    hash          (sto/calculate-hash stream)
+                    content       (-> (sto/content stream size)
+                                      (sto/wrap-with-hash hash))
+                    params        (-> smeta
+                                      (assoc ::sto/deduplicate? params)
+                                      (assoc ::sto/content content)
+                                      (assoc ::sto/touched-at (dt/now))
+                                      (assoc :bucket "file-media-object"))
+                    sobject       (sto/put-object! storage params)]
+                (swap! index assoc id (:id sobject)))))
+
+          ;; Step 2: insert all file-media-object rows with correct
+          ;; storage-id reference.
+          (doseq [item @media]
+            (db/insert! conn :file-media-object
+                        (-> item
+                            (d/update-when :media-id #(get @index %))
+                            (d/update-when :thumbnail-id #(get @index %))))))))))
+
+
+
 
 
 
