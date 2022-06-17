@@ -130,8 +130,8 @@
     (mf/use-effect
      (mf/deps file slinks @opts)
      (fn []
-       (let [{:keys [flags pages] :as params} (prepare-params @opts)
-             slink  (d/seek #(and (= (:flags %) flags) (= (:pages %) pages)) slinks)
+       (let [{:keys [pages who-comment who-inspect] :as params} (prepare-params @opts)
+             slink  (d/seek #(and (= (:who-inspect %) who-inspect) (= (:who-comment %) who-comment) (= (:pages %) pages)) slinks)
              href   (when slink
                       (let [pparams (:path-params route)
                             qparams (-> (:query-params route)
@@ -162,7 +162,7 @@
                             :on-click copy-link}
             i/copy]])
         [:div.hint-wrapper
-         (when (not @confirm)[:div.hint (tr "common.share-link.permissions-hint")])
+         (when (not @confirm) [:div.hint (tr "common.share-link.permissions-hint")])
          (cond
            (true? @confirm)
            [:div.confirm-dialog
@@ -189,8 +189,7 @@
             {:type "button"
              :class "primary"
              :on-click create-link
-             :value (tr "common.share-link.get-link")}])]
-        ]]
+             :value (tr "common.share-link.get-link")}])]]]
       [:div.modal-content.ops-section
        [:div.manage-permissions
         {:on-click manage-open-ops}
@@ -258,9 +257,7 @@
             [:select.input-select {:on-change (partial on-who-change :inspect)
                                    :value (:who-inspect @opts)}
              [:option {:value "team"}  (tr "common.share-link.team-members")]
-             [:option {:value "all"}  (tr "common.share-link.all-users")]]]]])]
-
-      ]]))
+             [:option {:value "all"}  (tr "common.share-link.all-users")]]]]])]]]))
 
 
 
